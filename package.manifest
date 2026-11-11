@@ -1,0 +1,23 @@
+{
+    "author": "Cledir Justo, fork of the package by Mario Casero",
+    "description": "Send Checkmk notifications to a Telegram chat or group.\n\nFork of Telegram_Notifications 2.1.0 by Mario Casero (based on https://exchange.checkmk.com/p/telegram-notify), updated for Checkmk 2.5:\n\n- The bot token uses the standard Checkmk password field: hidden in the GUI and selectable from the password store.\n- Notification parameters are registered with the rulesets API (cmk.rulesets.v1), so Analyze configuration no longer reports a legacy GUI extension.\n- Parameters saved by 2.1.x keep working without changes.\n\nRequirements: a bot token from @BotFather and the chat or group ID, with the bot added to the group.",
+    "download_url": "https://github.com/cledirjusto/checkmk-telegram-notifications",
+    "files": {
+        "cmk_addons_plugins": [
+            "telegram/rulesets/telegram.py"
+        ],
+        "gui": [
+            "views/hoststatus_report",
+            "views/service_report"
+        ],
+        "notifications": [
+            "telegram"
+        ]
+    },
+    "name": "Telegram_Notifications",
+    "title": "Telegram Notifications",
+    "version": "2.2.0",
+    "version.min_required": "2.5.0",
+    "version.packaged": "checkmk-telegram-notifications build_mkp.py",
+    "version.usable_until": null
+}

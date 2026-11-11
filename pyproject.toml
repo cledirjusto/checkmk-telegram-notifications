@@ -1,0 +1,54 @@
+[project]
+name = "checkmk-telegram-notifications"
+version = "2.2.0"
+description = "Checkmk extension: send notifications to Telegram"
+readme = "README.md"
+authors = [{ name = "Cledir Justo" }, { name = "Mario Casero" }]
+requires-python = ">=3.12"
+license = { text = "GPL-2.0-or-later" }
+classifiers = [
+    "License :: OSI Approved :: GNU General Public License v2 or later (GPLv2+)",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: System :: Monitoring",
+]
+
+# The plug-ins run inside the Checkmk site and need nothing beyond it.
+dependencies = []
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "ruff",
+]
+
+[project.urls]
+Homepage = "https://github.com/cledirjusto/checkmk-telegram-notifications"
+
+# The package is not installed with pip - it is built into an .mkp with
+# scripts/build_mkp.py - so no build backend is configured on purpose.
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+extend-exclude = ["dist"]
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle
+    "F",    # pyflakes
+    "W",    # pycodestyle warnings
+    "I",    # isort
+    "UP",   # pyupgrade
+    "B",    # bugbear
+    "C4",   # comprehensions
+    "SIM",  # simplify
+    "RUF",
+]
+
+[tool.ruff.format]
+quote-style = "double"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = [".", "tests"]
+filterwarnings = ["error::DeprecationWarning"]

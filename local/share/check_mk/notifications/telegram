@@ -1,0 +1,207 @@
+#!/usr/bin/env python3
+# Telegram
+# Bulk: no
+# Copyright (C) 2023 Dragosiz ft. Mario Casero mario.casero@dragosiz.es - License: GNU General Public License v2
+# Modified 2026 by Cledir Justo: bot token from the Checkmk password store (see CHANGELOG.md)
+# Este archivo es parte de la integración con Checkmk para notificaciones de Telegram.
+#
+# _________  _______   ___       _______   ________  ________  ________  _____ ______           ________  ___  ___  _______   ________  ___  __    _____ ______   ___  __       
+#|\___   ___\\  ___ \ |\  \     |\  ___ \ |\   ____\|\   __  \|\   __  \|\   _ \  _   \        |\   ____\|\  \|\  \|\  ___ \ |\   ____\|\  \|\  \ |\   _ \  _   \|\  \|\  \     
+#\|___ \  \_\ \   __/|\ \  \    \ \   __/|\ \  \___|\ \  \|\  \ \  \|\  \ \  \\\__\ \  \       \ \  \___|\ \  \\\  \ \   __/|\ \  \___|\ \  \/  /|\ \  \\\__\ \  \ \  \/  /|_   
+#     \ \  \ \ \  \_|/_\ \  \    \ \  \_|/_\ \  \  __\ \   _  _\ \   __  \ \  \\|__| \  \       \ \  \    \ \   __  \ \  \_|/_\ \  \    \ \   ___  \ \  \\|__| \  \ \   ___  \  
+#      \ \  \ \ \  \_|\ \ \  \____\ \  \_|\ \ \  \|\  \ \  \\  \\ \  \ \  \ \  \    \ \  \       \ \  \____\ \  \ \  \ \  \_|\ \ \  \____\ \  \\ \  \ \  \    \ \  \ \  \\ \  \ 
+#       \ \__\ \ \_______\ \_______\ \_______\ \_______\ \__\\ _\\ \__\ \__\ \__\    \ \__\       \ \_______\ \__\ \__\ \_______\ \_______\ \__\\ \__\ \__\    \ \__\ \__\\ \__\
+#        \|__|  \|_______|\|_______|\|_______|\|_______|\|__|\|__|\|__|\|__|\|__|     \|__|        \|_______|\|__|\|__|\|_______|\|_______|\|__| \|__|\|__|     \|__|\|__| \|__|
+
+from __future__ import unicode_literals
+
+import sys
+import requests
+import os
+import re
+import urllib.parse
+from cmk.notification_plugins import utils # type: ignore
+
+
+VIEW_HOST = "hoststatus_report"
+VIEW_SERVICE = "service_report"
+
+
+tmpl_host_text = """$HOSTSTATE_EMOJI$ `$HOSTNAME$` \n $URL$
+```
+Host:     $HOSTNAME$
+Event:    $EVENT_TXT$
+Output:   $HOSTOUTPUT$
+```"""
+
+tmpl_service_text = """$SERVICESTATE_EMOJI$ `$HOSTNAME$/$SERVICEDESC$` \n $URL$
+```
+Host:     $HOSTNAME$
+Service:  $SERVICEDESC$
+Event:    $EVENT_TXT$
+Output:   $SERVICEOUTPUT$
+```"""
+
+
+def hoststate_as_emoji(hoststate):
+    if hoststate == "UP":
+        return "\ud83d\udd35"  # large blue circle
+    elif hoststate == "DOWN":
+        return "\ud83d\udd34"  # large red circle
+    elif hoststate == "UNREACH":
+        return "\u26aa\ufe0f"  # medium white circle
+    return hoststate
+
+
+def servicestate_as_emoji(servicestate):
+    if servicestate == "OK":
+        return "\ud83c\udd97"  # squared ok
+    elif servicestate == "WARN":
+        return "\u26a0\ufe0f"  # warning sign
+    elif servicestate == "CRIT":
+        return "\u2757\ufe0f"  # heavy exclamation mark symbol
+    elif servicestate == "UNKN":
+        return "\u2754"  # white question mark ornament
+    return servicestate
+
+def base_url(context):
+    prefix = context.get("PARAMETER_URL_PREFIX_1")
+    if prefix == "automatic_http":
+        url_prefix = f"http://{context.get('MONITORING_HOST', '')}/{context.get('OMD_SITE', '')}"
+    elif prefix == "automatic_https":
+        url_prefix = f"https://{context.get('MONITORING_HOST', '')}/{context.get('OMD_SITE', '')}"
+    elif prefix == "manual":
+        url_prefix = context.get("PARAMETER_URL_PREFIX_2", "")
+    else:
+        return ""
+
+    return re.sub("/check_mk/?", "", url_prefix, count=1)
+
+def url_set(context):
+    host = context.get("HOSTNAME", "")
+
+    if context.get("WHAT") == "SERVICE":
+        label = "View service stats"
+        service = urllib.parse.quote(context.get("SERVICEDESC", ""))
+        query = f"view_name={VIEW_SERVICE}&host={host}&service={service}"
+    else:
+        label = "View host stats"
+        query = f"view_name={VIEW_HOST}&host={host}"
+
+    base = base_url(context)
+    if not base:
+        ip = os.popen("hostname -I").read().strip()
+        if not ip:
+            return ""
+        base = f"http://{ip}/{context.get('OMD_SITE', '')}"
+
+    return f"[{label}]({base}/check_mk/view.py?{query})"
+
+def construct_message_text(context):
+
+    context["URL"] = url_set(context)
+
+    if context.get("WHAT") == "HOST":
+        context["HOSTNAME"] = f"{context.get('HOSTNAME', '')}"
+    elif context.get("WHAT") == "SERVICE":
+        context["SERVICEDESC"] = f"{context.get('SERVICEDESC', '')}"
+
+    context["HOSTSTATE_EMOJI"] = hoststate_as_emoji(context.get("HOSTSHORTSTATE", ""))
+    context["SERVICESTATE_EMOJI"] = servicestate_as_emoji(
+        context.get("SERVICESHORTSTATE", "")
+    )
+
+    notification_type = context["NOTIFICATIONTYPE"]
+    if notification_type in ["PROBLEM", "RECOVERY"]:
+        txt_info = "$PREVIOUS@HARDSHORTSTATE$ -> $@SHORTSTATE$"
+    elif notification_type.startswith("FLAP"):
+        if "START" in notification_type:
+            txt_info = "Started Flapping"
+        else:
+            txt_info = "Stopped Flapping ($@SHORTSTATE$)"
+    elif notification_type.startswith("DOWNTIME"):
+        what = notification_type[8:].title()
+        txt_info = "Downtime " + what + " ($@SHORTSTATE$)"
+    elif notification_type == "ACKNOWLEDGEMENT":
+        txt_info = "Acknowledged ($@SHORTSTATE$)"
+    elif notification_type == "CUSTOM":
+        txt_info = "Custom Notification ($@SHORTSTATE$)"
+    else:
+        txt_info = notification_type
+
+    context["EVENT_TXT"] = utils.substitute_context(
+        txt_info.replace("@", context["WHAT"]), context
+    )
+
+    if context["WHAT"] == "HOST":
+        tmpl_text = tmpl_host_text
+    else:
+        tmpl_text = tmpl_service_text
+
+    return utils.substitute_context(tmpl_text, context)
+
+
+
+def send_telegram_message(token, chat_id, text):
+    url = f"https://api.telegram.org/bot{token}/sendMessage"
+    payload = {
+        "chat_id": chat_id,
+        "disable_web_page_preview": True,
+        "parse_mode": "Markdown",
+        "text": text,
+    }
+
+    try:
+        response = utils.post_request(lambda context: payload, url=url)
+    except requests.exceptions.RequestException as exc:
+        sys.stderr.write(
+            "Failed to send Telegram message: {}\n".format(
+                str(exc).replace(token, "***")
+            )
+        )
+        return 1
+
+    status = utils.process_by_status_code(response)
+    if status == 0:
+        sys.stdout.write(
+            "Sent message to Telegram chat {}\n".format(chat_id)
+        )
+
+    return status
+
+
+def get_bot_token(context):
+    # 2.2.0: Password form spec format, split into PARAMETER_BOT_KEY_1.._3_2
+    if context.get("PARAMETER_BOT_KEY_1") == "cmk_postprocessed":
+        return utils.get_password_from_env_or_context("PARAMETER_BOT_KEY", context)
+    # 2.1.1/2.1.2: ("store", id) or ("bot_key", token), split _1/_2 keys,
+    # or a plain token saved by 2.1.0.
+    if "PARAMETER_BOT_KEY_1" in context:
+        kind = context["PARAMETER_BOT_KEY_1"]
+        value = context.get("PARAMETER_BOT_KEY_2", "")
+    else:
+        kind, _sep, value = context.get("PARAMETER_BOT_KEY", "").strip().partition(" ")
+        if not value:
+            return kind
+    if kind == "store":
+        return utils.retrieve_from_passwordstore(f"store {value}")
+    return value
+
+
+def main():
+    context = utils.collect_context()
+    token = get_bot_token(context)
+    chat_id = context.get("PARAMETER_GROUP_ID", "")
+
+    if not token or not chat_id:
+        sys.stderr.write(
+            "Missing notification parameters bot_key or group_id\n"
+        )
+        return 2
+
+    text = construct_message_text(context)
+    return send_telegram_message(token, chat_id, text)
+
+
+if __name__ == "__main__":
+    sys.exit(main())
